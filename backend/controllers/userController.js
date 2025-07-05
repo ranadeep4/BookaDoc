@@ -129,27 +129,27 @@ const updateProfile = async (req, res) => {
 const bookAppointment = async (req, res) => {
   try {
     const { userId, docId, slotDate, slotTime } = req.body;
-    const docData = await doctorModel.findById(docId).select("-password");
-    if (!docData.available) {
-      return res.json({ success: false, message: "Doctor is not available" });
-    }
-    let slots_booked = docData.slots_booked;
-    // checking for slots availability
+    // Atomically add the slot if not already booked
+    const docData = await doctorModel.findOneAndUpdate(
+      {
+        _id: docId,
+        available: true,
+        $or: [
+          { [`slots_booked.${slotDate}`]: { $exists: false } },
+          { [`slots_booked.${slotDate}`]: { $not: { $elemMatch: { $eq: slotTime } } } }
+        ]
+      },
+      {
+        $push: { [`slots_booked.${slotDate}`]: slotTime }
+      },
+      { new: true }
+    ).select("-password");
 
-    if (slots_booked[slotDate]) {
-      if (slots_booked[slotDate].includes(slotTime)) {
-        return res.json({ success: false, message: "Slot not available" });
-      } else {
-        slots_booked[slotDate].push(slotTime);
-      }
-    } else {
-      slots_booked[slotDate] = [];
-      slots_booked[slotDate].push(slotTime);
+    if (!docData) {
+      return res.json({ success: false, message: "Slot not available or doctor not available" });
     }
 
     const userData = await userModel.findById(userId).select("-password");
-    delete docData.slots_booked;
-
     const appointmentData = {
       userId,
       docId,
@@ -161,12 +161,19 @@ const bookAppointment = async (req, res) => {
       date: Date.now(),
     };
 
-    const newAppointment = new appointmentModel(appointmentData);
-    await newAppointment.save();
-
-    // save new slots data in doctors data
-
-    await doctorModel.findByIdAndUpdate(docId, { slots_booked });
+    try {
+      const newAppointment = new appointmentModel(appointmentData);
+      await newAppointment.save();
+    } catch (err) {
+      // Handle duplicate key error from unique index
+      if (err.code === 11000) {
+        // Rollback the slot booking in doctorModel
+        await doctorModel.findByIdAndUpdate(docId, { $pull: { [`slots_booked.${slotDate}`]: slotTime } });
+        return res.json({ success: false, message: "Slot already booked. Please choose another." });
+      } else {
+        throw err;
+      }
+    }
 
     res.json({ success: true, message: "Appointment booked successfully" });
   } catch (error) {
