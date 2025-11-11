@@ -1,0 +1,45 @@
+services:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    container_name: backend
+    env_file:
+      - ./backend/.env
+    ports:
+      - "5000:5000"
+    networks:
+      - bookadoc-network
+    restart: always
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    container_name: frontend
+    env_file:
+      - ./frontend/.env
+    ports:
+      - "5173:5173"
+    networks:
+      - bookadoc-network
+    depends_on:
+      - backend
+
+  admin:
+    build:
+      context: ./admin
+      dockerfile: Dockerfile
+    container_name: admin
+    env_file:
+      - ./admin/.env
+    ports:
+      - "5174:5174"
+    networks:
+      - bookadoc-network
+    depends_on:
+      - backend
+
+networks:
+  bookadoc-network:
+    driver: bridge
